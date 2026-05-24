@@ -36,7 +36,9 @@
   };
   var CURRENT_HIGHLIGHT_COLOR = "yellow";
   var CURRENT_TEST_CONTEXT = {
+    session_kind: "test",
     attempt_id: null,
+    passage_attempt_id: null,
     passage_id: null,
     question_id: null,
     is_flagged: false,
@@ -44,6 +46,74 @@
     current_question_number: 1,
     total_questions: 0,
   };
+
+  function withSessionPayload(base) {
+    if (window.PortalSession && window.PortalSession.withSessionPayload) {
+      return window.PortalSession.withSessionPayload(base);
+    }
+    var payload = Object.assign({}, base || {});
+    var passageAttemptId =
+      CURRENT_TEST_CONTEXT.passage_attempt_id ||
+      new URLSearchParams(window.location.search || "").get("passage_attempt_id");
+    if (passageAttemptId) {
+      payload.passage_attempt_id = passageAttemptId;
+      delete payload.attempt_id;
+      return payload;
+    }
+    if (CURRENT_TEST_CONTEXT.attempt_id) {
+      payload.attempt_id = CURRENT_TEST_CONTEXT.attempt_id;
+    }
+    delete payload.passage_attempt_id;
+    return payload;
+  }
+
+  function getContextSessionId() {
+    if (CURRENT_TEST_CONTEXT.session_kind === "passage") {
+      return CURRENT_TEST_CONTEXT.passage_attempt_id;
+    }
+    return CURRENT_TEST_CONTEXT.attempt_id;
+  }
+
+  function getContentSessionId(content) {
+    if (!content) return null;
+    if (content.session_kind === "passage" && content.passage_attempt_id) {
+      return content.passage_attempt_id;
+    }
+    return content.attempt_id || null;
+  }
+
+  function applySessionFromContent(content) {
+    if (!content) return;
+    if (window.PortalSession && window.PortalSession.applyFromContent) {
+      window.PortalSession.applyFromContent(content);
+    }
+    if (content.session_kind === "passage" && content.passage_attempt_id) {
+      CURRENT_TEST_CONTEXT.session_kind = "passage";
+      CURRENT_TEST_CONTEXT.passage_attempt_id = content.passage_attempt_id;
+      CURRENT_TEST_CONTEXT.attempt_id = null;
+      return;
+    }
+    CURRENT_TEST_CONTEXT.session_kind = "test";
+    CURRENT_TEST_CONTEXT.attempt_id = content.attempt_id || null;
+    CURRENT_TEST_CONTEXT.passage_attempt_id = null;
+  }
+
+  function seedPassageSessionFromUrl() {
+    var passageAttemptId = new URLSearchParams(window.location.search || "").get(
+      "passage_attempt_id",
+    );
+    if (!passageAttemptId) return;
+    CURRENT_TEST_CONTEXT.session_kind = "passage";
+    CURRENT_TEST_CONTEXT.passage_attempt_id = passageAttemptId;
+    CURRENT_TEST_CONTEXT.attempt_id = null;
+    if (window.PortalSession && window.PortalSession.rememberPassageAttempt) {
+      window.PortalSession.rememberPassageAttempt(passageAttemptId);
+    } else {
+      localStorage.setItem("portal_session_kind", "passage");
+      localStorage.setItem("portal_active_passage_attempt_id", passageAttemptId);
+      localStorage.removeItem("portal_active_attempt_id");
+    }
+  }
 
   var questionDwellSessionStartMs = null;
   var questionDwellSessionAttemptId = null;
@@ -113,7 +183,7 @@
       if (document.hidden) {
         flushOpenQuestionDwellSegment();
       } else {
-        var aid = CURRENT_TEST_CONTEXT.attempt_id;
+        var aid = getContextSessionId();
         var qid = CURRENT_TEST_CONTEXT.question_id;
         if (aid && qid) startQuestionDwellSession(aid, qid);
       }
@@ -148,7 +218,7 @@
   }
 
   function persistCurrentPassageMarkup() {
-    var attemptId = CURRENT_TEST_CONTEXT.attempt_id;
+    var attemptId = getContextSessionId();
     var passageId = CURRENT_TEST_CONTEXT.passage_id;
     var body = getPassageBodyElement();
     if (!attemptId || !passageId || !body) return;
@@ -254,7 +324,7 @@
     if (!body) return;
     var text = (passage && passage.body) || "";
     var saved = getSavedPassageMarkup(
-      CURRENT_TEST_CONTEXT.attempt_id,
+      getContextSessionId(),
       passage && passage.id,
     );
     if (saved) {
@@ -457,19 +527,24 @@
   }
 
   function redirectToSectionReview() {
-    var attemptId = CURRENT_TEST_CONTEXT.attempt_id;
+    var sessionId = getContextSessionId();
     var passageId = CURRENT_TEST_CONTEXT.passage_id;
-    if (!attemptId || !passageId) return;
+    if (!sessionId || !passageId) return;
     flushOpenQuestionDwellSegment();
     persistCurrentPassageMarkup();
     setExamTimerPaused(true, "section_review");
     setModalOpen(false);
-    window.location.href =
-      SECTION_REVIEW_URL +
-      "?attempt_id=" +
-      encodeURIComponent(String(attemptId)) +
-      "&passage_id=" +
-      encodeURIComponent(String(passageId));
+    var query =
+      CURRENT_TEST_CONTEXT.session_kind === "passage"
+        ? "?passage_attempt_id=" +
+          encodeURIComponent(String(sessionId)) +
+          "&passage_id=" +
+          encodeURIComponent(String(passageId))
+        : "?attempt_id=" +
+          encodeURIComponent(String(sessionId)) +
+          "&passage_id=" +
+          encodeURIComponent(String(passageId));
+    window.location.href = SECTION_REVIEW_URL + query;
   }
 
   function navigateToQuestion(questionNumber, loadingMessage, errorPrefix) {
@@ -574,7 +649,8 @@
   }
 
   function syncAttemptAnswersFromContent(content) {
-    if (!content || !content.attempt_id || !Array.isArray(content.navigation_items)) {
+    var contentSessionId = getContentSessionId(content);
+    if (!content || !contentSessionId || !Array.isArray(content.navigation_items)) {
       return;
     }
 
@@ -584,7 +660,7 @@
     content.navigation_items.forEach(function (item) {
       if (!item || !item.question_id || !item.selected_choice) return;
       map[item.question_id] = {
-        attempt_id: content.attempt_id,
+        attempt_id: contentSessionId,
         selected_choice: item.selected_choice,
         selected_at: new Date().toISOString(),
       };
@@ -595,14 +671,14 @@
   }
 
   function mergeLocalAttemptAnswersIntoContent(content) {
-    if (!content || !content.attempt_id) return content;
+    if (!content || !getContentSessionId(content)) return content;
 
     var map = getAttemptAnswerMap();
     function resolveChoice(questionId, existingChoice) {
       var local = map[questionId];
       if (
         local &&
-        local.attempt_id === content.attempt_id &&
+        local.attempt_id === getContentSessionId(content) &&
         local.selected_choice
       ) {
         return local.selected_choice;
@@ -664,19 +740,21 @@
     var userId = getPortalUserId();
     if (
       !userId ||
-      !CURRENT_TEST_CONTEXT.attempt_id ||
+      !getContextSessionId() ||
       !questionId ||
       !selectedChoice
     ) {
       return Promise.resolve();
     }
 
-    return postToFunction(SAVE_ANSWER_FUNCTION_URL, {
-      user_id: userId,
-      attempt_id: CURRENT_TEST_CONTEXT.attempt_id,
-      question_id: questionId,
-      selected_choice: selectedChoice,
-    }).catch(function (err) {
+    return postToFunction(
+      SAVE_ANSWER_FUNCTION_URL,
+      withSessionPayload({
+        user_id: userId,
+        question_id: questionId,
+        selected_choice: selectedChoice,
+      }),
+    ).catch(function (err) {
       console.error("Failed to save answer:", err);
     });
   }
@@ -1305,11 +1383,13 @@
         : "Flagging...";
 
       try {
-        var result = await postToFunction(TOGGLE_QUESTION_FLAG_FUNCTION_URL, {
-          user_id: userId,
-          attempt_id: CURRENT_TEST_CONTEXT.attempt_id,
-          question_id: CURRENT_TEST_CONTEXT.question_id,
-        });
+        var result = await postToFunction(
+          TOGGLE_QUESTION_FLAG_FUNCTION_URL,
+          withSessionPayload({
+            user_id: userId,
+            question_id: CURRENT_TEST_CONTEXT.question_id,
+          }),
+        );
         CURRENT_TEST_CONTEXT.is_flagged = Boolean(result.is_flagged);
         syncActiveTestFlagState(
           CURRENT_TEST_CONTEXT.question_id,
@@ -1594,10 +1674,10 @@
   }
 
   function persistTimerSnapshot() {
-    if (!CURRENT_TEST_CONTEXT.attempt_id) return;
+    if (!getContextSessionId()) return;
     var existing = loadTimerSnapshot() || {};
     var snapshot = {
-      attempt_id: CURRENT_TEST_CONTEXT.attempt_id,
+      attempt_id: getContextSessionId(),
       remaining_seconds: CURRENT_TEST_CONTEXT.remaining_seconds || 0,
       updated_at: new Date().toISOString(),
     };
@@ -1624,9 +1704,9 @@
   }
 
   function setExamTimerPaused(isPaused, pauseContext) {
-    if (!CURRENT_TEST_CONTEXT.attempt_id) return;
+    if (!getContextSessionId()) return;
     var snapshot = loadTimerSnapshot() || {};
-    snapshot.attempt_id = CURRENT_TEST_CONTEXT.attempt_id;
+    snapshot.attempt_id = getContextSessionId();
     snapshot.remaining_seconds = Number(
       CURRENT_TEST_CONTEXT.remaining_seconds ||
         snapshot.remaining_seconds ||
@@ -1644,15 +1724,30 @@
 
   function getSectionReviewReturnUrl() {
     var params = new URLSearchParams(window.location.search || "");
-    var attemptId =
-      params.get("attempt_id") || CURRENT_TEST_CONTEXT.attempt_id || "";
+    var sessionId =
+      params.get("passage_attempt_id") ||
+      params.get("attempt_id") ||
+      getContextSessionId() ||
+      "";
     var passageId =
       params.get("passage_id") || CURRENT_TEST_CONTEXT.passage_id || "";
-    if (!attemptId || !passageId) return null;
+    if (!sessionId || !passageId) return null;
+    if (
+      CURRENT_TEST_CONTEXT.session_kind === "passage" ||
+      params.get("passage_attempt_id")
+    ) {
+      return (
+        SECTION_REVIEW_URL +
+        "?passage_attempt_id=" +
+        encodeURIComponent(String(sessionId)) +
+        "&passage_id=" +
+        encodeURIComponent(String(passageId))
+      );
+    }
     return (
       SECTION_REVIEW_URL +
       "?attempt_id=" +
-      encodeURIComponent(String(attemptId)) +
+      encodeURIComponent(String(sessionId)) +
       "&passage_id=" +
       encodeURIComponent(String(passageId))
     );
@@ -1714,16 +1809,26 @@
     var userId = getPortalUserId();
     if (!userId) return;
 
-    var activeAttempt = await postToFunction(ACTIVE_ATTEMPT_FUNCTION_URL, {
-      user_id: userId,
-    });
+    var activeAttempt = await postToFunction(
+      ACTIVE_ATTEMPT_FUNCTION_URL,
+      withSessionPayload({ user_id: userId }),
+    );
 
     if (!activeAttempt || !activeAttempt.has_active_attempt) {
       setTimerText(0);
       return;
     }
 
-    CURRENT_TEST_CONTEXT.attempt_id = activeAttempt.attempt_id || null;
+    if (activeAttempt.session_kind === "passage" || activeAttempt.passage_attempt_id) {
+      CURRENT_TEST_CONTEXT.session_kind = "passage";
+      CURRENT_TEST_CONTEXT.passage_attempt_id =
+        activeAttempt.passage_attempt_id || null;
+      CURRENT_TEST_CONTEXT.attempt_id = null;
+    } else {
+      CURRENT_TEST_CONTEXT.session_kind = "test";
+      CURRENT_TEST_CONTEXT.attempt_id = activeAttempt.attempt_id || null;
+      CURRENT_TEST_CONTEXT.passage_attempt_id = null;
+    }
     CURRENT_TEST_CONTEXT.remaining_seconds = Number(
       activeAttempt.remaining_seconds || 0,
     );
@@ -1732,7 +1837,7 @@
     if (
       localTimer &&
       localTimer.attempt_id &&
-      localTimer.attempt_id === CURRENT_TEST_CONTEXT.attempt_id
+      localTimer.attempt_id === getContextSessionId()
     ) {
       var localRemaining = Number(localTimer.remaining_seconds || 0);
       if (localRemaining > 0) {
@@ -1816,16 +1921,16 @@
     if (selectedKey) {
       persistSelectedChoice(questionId, selectedKey);
 
-      if (questionId && CURRENT_TEST_CONTEXT.attempt_id) {
+      if (questionId && getContextSessionId()) {
         var map = getAttemptAnswerMap();
         var previous =
           map[questionId] &&
-          map[questionId].attempt_id === CURRENT_TEST_CONTEXT.attempt_id
+          map[questionId].attempt_id === getContextSessionId()
             ? map[questionId].selected_choice
             : null;
 
         map[questionId] = {
-          attempt_id: CURRENT_TEST_CONTEXT.attempt_id,
+          attempt_id: getContextSessionId(),
           selected_choice: selectedKey,
           selected_at: new Date().toISOString(),
         };
@@ -1839,7 +1944,7 @@
         if (previous !== selectedKey) {
           var events = getAttemptAnswerEvents();
           events.push({
-            attempt_id: CURRENT_TEST_CONTEXT.attempt_id,
+            attempt_id: getContextSessionId(),
             question_id: questionId,
             previous_choice: previous,
             new_choice: selectedKey,
@@ -1931,17 +2036,19 @@
 
     var content = await postToFunction(
       ACTIVE_TEST_CONTENT_FUNCTION_URL,
-      payload,
+      withSessionPayload(payload),
     );
 
     if (!content || !content.current_passage || !content.current_question)
       return;
 
+    applySessionFromContent(content);
     syncAttemptAnswersFromContent(content);
     content = mergeLocalAttemptAnswersIntoContent(content);
 
-    ensureAllowedSectionPosition(content.attempt_id);
-    var allowedPosition = getAllowedSectionPosition(content.attempt_id);
+    var contentSessionId = getContentSessionId(content);
+    ensureAllowedSectionPosition(contentSessionId);
+    var allowedPosition = getAllowedSectionPosition(contentSessionId);
     if (content.current_passage.position > allowedPosition) {
       var firstAllowedQuestion = getFirstQuestionNumberForPassagePosition(
         content,
@@ -1972,7 +2079,7 @@
     );
 
     setText("[data-passage-title]", content.current_passage.title || "");
-    CURRENT_TEST_CONTEXT.attempt_id = content.attempt_id || null;
+    applySessionFromContent(content);
     CURRENT_TEST_CONTEXT.passage_id = content.current_passage.id || null;
     renderPassageBody(content.current_passage);
     renderPassageAttribution(content.current_passage);
@@ -1995,7 +2102,7 @@
       content.current_question.is_flagged,
     );
     startQuestionDwellSession(
-      content.attempt_id,
+      getContentSessionId(content),
       content.current_question.id || null,
     );
     CURRENT_TEST_CONTEXT.total_questions = Number(content.total_questions || 0);
@@ -2028,6 +2135,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     showInitLoader();
+    seedPassageSessionFromUrl();
     applyUserToScreen();
     wireNavigationModal();
     wireSectionReviewReturnShortcut();
