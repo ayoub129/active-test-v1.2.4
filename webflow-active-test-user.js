@@ -375,7 +375,7 @@
       ".text-block-63.nav-flag-flagged{color:#e00!important;}" +
       "[data-passage-figures]{display:none!important;}" +
       "[data-passage-inline-figure]{margin:0;}" +
-      "[data-passage-inline-figure] img{display:block;max-width:100%;height:auto;}" +
+      "[data-passage-inline-figure] img{display:block;max-width:100%;height:auto;width:80%;margin: 0 auto;}" +
       "[data-passage-inline-figure] [data-passage-figure-caption],figcaption[data-passage-figure-caption]{margin-top:8px;font-size:13px;line-height:1.45;color:#333;}" +
       "[data-passage-attribution]{margin-top:16px;font-size:12px;line-height:1.45;color:#555;}" +
       "[data-text-action='highlight'][data-highlight-color]{box-shadow:inset 0 -4px 0 var(--active-highlight-color,#fff59d);}" +
