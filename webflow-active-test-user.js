@@ -54,7 +54,9 @@
     var payload = Object.assign({}, base || {});
     var passageAttemptId =
       CURRENT_TEST_CONTEXT.passage_attempt_id ||
-      new URLSearchParams(window.location.search || "").get("passage_attempt_id");
+      new URLSearchParams(window.location.search || "").get(
+        "passage_attempt_id",
+      );
     if (passageAttemptId) {
       payload.passage_attempt_id = passageAttemptId;
       delete payload.attempt_id;
@@ -99,9 +101,9 @@
   }
 
   function seedPassageSessionFromUrl() {
-    var passageAttemptId = new URLSearchParams(window.location.search || "").get(
-      "passage_attempt_id",
-    );
+    var passageAttemptId = new URLSearchParams(
+      window.location.search || "",
+    ).get("passage_attempt_id");
     if (!passageAttemptId) return;
     CURRENT_TEST_CONTEXT.session_kind = "passage";
     CURRENT_TEST_CONTEXT.passage_attempt_id = passageAttemptId;
@@ -110,7 +112,10 @@
       window.PortalSession.rememberPassageAttempt(passageAttemptId);
     } else {
       localStorage.setItem("portal_session_kind", "passage");
-      localStorage.setItem("portal_active_passage_attempt_id", passageAttemptId);
+      localStorage.setItem(
+        "portal_active_passage_attempt_id",
+        passageAttemptId,
+      );
       localStorage.removeItem("portal_active_attempt_id");
     }
   }
@@ -262,9 +267,7 @@
     img.src = figure.image_url || "";
     img.alt =
       figure.alt_text ||
-      (figure.panel_label
-        ? "Figure " + figure.panel_label
-        : "Passage figure");
+      (figure.panel_label ? "Figure " + figure.panel_label : "Passage figure");
     img.loading = "lazy";
     img.setAttribute("data-passage-figure-image", "");
     panel.appendChild(img);
@@ -650,7 +653,11 @@
 
   function syncAttemptAnswersFromContent(content) {
     var contentSessionId = getContentSessionId(content);
-    if (!content || !contentSessionId || !Array.isArray(content.navigation_items)) {
+    if (
+      !content ||
+      !contentSessionId ||
+      !Array.isArray(content.navigation_items)
+    ) {
       return;
     }
 
@@ -726,7 +733,8 @@
       window.activeTestContent.current_question &&
       window.activeTestContent.current_question.id === questionId
     ) {
-      window.activeTestContent.current_question.selected_choice = selectedChoice;
+      window.activeTestContent.current_question.selected_choice =
+        selectedChoice;
     }
     if (!Array.isArray(window.activeTestContent.navigation_items)) return;
     window.activeTestContent.navigation_items.forEach(function (item) {
@@ -738,12 +746,7 @@
 
   function persistAnswerToServer(questionId, selectedChoice) {
     var userId = getPortalUserId();
-    if (
-      !userId ||
-      !getContextSessionId() ||
-      !questionId ||
-      !selectedChoice
-    ) {
+    if (!userId || !getContextSessionId() || !questionId || !selectedChoice) {
       return Promise.resolve();
     }
 
@@ -797,7 +800,9 @@
   }
 
   function getHighlightColorToggle() {
-    return document.querySelector("[data-text-action='highlight-color-toggle']");
+    return document.querySelector(
+      "[data-text-action='highlight-color-toggle']",
+    );
   }
 
   function getHighlightColorKey() {
@@ -830,7 +835,10 @@
   function syncHighlightColorControl() {
     var colorKey = getHighlightColorKey();
     var colorValue = HIGHLIGHT_COLORS[colorKey];
-    var controls = [getFormattingButtons().highlightButton, getHighlightColorToggle()];
+    var controls = [
+      getFormattingButtons().highlightButton,
+      getHighlightColorToggle(),
+    ];
     controls.forEach(function (control) {
       if (!control) return;
       control.setAttribute("data-highlight-color", colorKey);
@@ -932,6 +940,15 @@
     redirectToSectionReview();
   }
 
+  function applyReviewScreenButtonAlign(nextButton) {
+    if (!nextButton) return;
+    if (isSectionReviewSingleMode()) {
+      nextButton.style.marginLeft = "auto";
+    } else {
+      nextButton.style.removeProperty("margin-left");
+    }
+  }
+
   function setSectionReviewChrome() {
     if (!isSectionReviewReturnMode()) return;
     setModalOpen(false);
@@ -948,6 +965,7 @@
       if (buttons.nextButton) {
         buttons.nextButton.style.display = "";
         buttons.nextButton.textContent = "Review Screen";
+        applyReviewScreenButtonAlign(buttons.nextButton);
       }
       return;
     }
@@ -966,8 +984,10 @@
     if (!buttons.nextButton) return;
     if (isSectionReviewSingleMode()) {
       buttons.nextButton.textContent = "Review Screen";
+      applyReviewScreenButtonAlign(buttons.nextButton);
       return;
     }
+    applyReviewScreenButtonAlign(buttons.nextButton);
     var content = window.activeTestContent;
     var range = content
       ? getPassageQuestionRange(content.current_passage)
@@ -1538,8 +1558,7 @@
     if (!textNode || textNode.nodeType !== 3 || !textNode.parentNode) return;
 
     var text = textNode.nodeValue || "";
-    var start =
-      textNode === range.startContainer ? range.startOffset : 0;
+    var start = textNode === range.startContainer ? range.startOffset : 0;
     var end = textNode === range.endContainer ? range.endOffset : text.length;
     start = Math.max(0, Math.min(start, text.length));
     end = Math.max(start, Math.min(end, text.length));
@@ -1683,7 +1702,8 @@
     };
     if (existing.exam_paused) {
       snapshot.exam_paused = true;
-      if (existing.pause_context) snapshot.pause_context = existing.pause_context;
+      if (existing.pause_context)
+        snapshot.pause_context = existing.pause_context;
     }
     localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify(snapshot));
   }
@@ -1708,9 +1728,7 @@
     var snapshot = loadTimerSnapshot() || {};
     snapshot.attempt_id = getContextSessionId();
     snapshot.remaining_seconds = Number(
-      CURRENT_TEST_CONTEXT.remaining_seconds ||
-        snapshot.remaining_seconds ||
-        0,
+      CURRENT_TEST_CONTEXT.remaining_seconds || snapshot.remaining_seconds || 0,
     );
     snapshot.exam_paused = Boolean(isPaused);
     if (isPaused) {
@@ -1819,7 +1837,10 @@
       return;
     }
 
-    if (activeAttempt.session_kind === "passage" || activeAttempt.passage_attempt_id) {
+    if (
+      activeAttempt.session_kind === "passage" ||
+      activeAttempt.passage_attempt_id
+    ) {
       CURRENT_TEST_CONTEXT.session_kind = "passage";
       CURRENT_TEST_CONTEXT.passage_attempt_id =
         activeAttempt.passage_attempt_id || null;
