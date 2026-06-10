@@ -16,6 +16,7 @@
   var TOOLBAR_WIRED = false;
   var FLAG_BUTTON_WIRED = false;
   var NAV_MODAL_WIRED = false;
+  var CHOICE_KEYBOARD_WIRED = false;
   var COUNTDOWN_INTERVAL_ID = null;
   var TIMER_STORAGE_KEY = "portal_timer_state";
   var SEEN_QUESTIONS_STORAGE_KEY = "portal_seen_questions";
@@ -2071,6 +2072,52 @@
     applyChoiceSelection(container, selectedChoice || null, questionId);
   }
 
+  function isNavModalOpen() {
+    var overlay = getNavModalOverlay();
+    if (!overlay) return false;
+    return (
+      overlay.style.display === "flex" ||
+      overlay.getAttribute("aria-hidden") === "false"
+    );
+  }
+
+  function isTypingInField(target) {
+    if (!target || !target.tagName) return false;
+    var tag = target.tagName.toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    return Boolean(target.isContentEditable);
+  }
+
+  function wireChoiceKeyboardShortcuts() {
+    if (CHOICE_KEYBOARD_WIRED) return;
+    CHOICE_KEYBOARD_WIRED = true;
+
+    document.addEventListener("keydown", function (event) {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (isTypingInField(event.target)) return;
+      if (isNavModalOpen()) return;
+
+      var key = String(event.key || "").toUpperCase();
+      if (key !== "A" && key !== "B" && key !== "C" && key !== "D") return;
+
+      var container = document.querySelector("[data-question-choices]");
+      if (!container) return;
+
+      var answer = container.querySelector(
+        '.aamc-answer[data-choice-key="' + key + '"]',
+      );
+      if (!answer || answer.style.display === "none") return;
+
+      event.preventDefault();
+      var questionId =
+        CURRENT_TEST_CONTEXT.question_id ||
+        (window.activeTestContent &&
+          window.activeTestContent.current_question &&
+          window.activeTestContent.current_question.id);
+      applyChoiceSelection(container, key, questionId);
+    });
+  }
+
   function getQuestionNumberFromUrl() {
     var params = new URLSearchParams(window.location.search || "");
     var raw = params.get("question_number");
@@ -2194,6 +2241,7 @@
     seedPassageSessionFromUrl();
     applyUserToScreen();
     wireNavigationModal();
+    wireChoiceKeyboardShortcuts();
     wireSectionReviewReturnShortcut();
     Promise.resolve()
       .then(function () {
