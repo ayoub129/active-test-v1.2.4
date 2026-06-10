@@ -372,6 +372,40 @@
     var style = document.createElement("style");
     style.id = ACTIVE_TEST_APP_STYLE_ID;
     style.textContent =
+      "[data-question-choices]{display:block!important;visibility:visible!important;}" +
+      "[data-question-choices] .aamc-answer{" +
+      "display:flex!important;align-items:flex-start!important;gap:8px!important;" +
+      "padding:8px 10px!important;margin-bottom:4px!important;cursor:pointer!important;" +
+      "font-size:13px!important;line-height:1.5!important;color:#111!important;" +
+      "background:transparent!important;border:1px solid transparent!important;" +
+      "box-sizing:border-box!important;position:relative!important;" +
+      "}" +
+      "[data-question-choices] .aamc-answer:hover{background:#f0f5ff!important;}" +
+      "[data-question-choices] .aamc-answer.selected{" +
+      "background:#ddeeff!important;border-color:#1B3669!important;" +
+      "}" +
+      "[data-question-choices] .aamc-radio{" +
+      "width:16px!important;height:16px!important;min-width:16px!important;" +
+      "border-radius:50%!important;border:2px solid #555!important;" +
+      "display:flex!important;align-items:center!important;justify-content:center!important;" +
+      "flex-shrink:0!important;margin-top:2px!important;background:transparent!important;" +
+      "box-sizing:border-box!important;" +
+      "}" +
+      "[data-question-choices] .aamc-answer.selected .aamc-radio{border-color:#1B3669!important;}" +
+      "[data-question-choices] .aamc-answer.selected .aamc-radio::after{" +
+      "content:''!important;width:8px!important;height:8px!important;" +
+      "border-radius:50%!important;background:#1B3669!important;display:block!important;" +
+      "}" +
+      "[data-question-choices] .aamc-answer-text{" +
+      "flex:1!important;font-weight:400!important;color:#111!important;" +
+      "visibility:visible!important;opacity:1!important;" +
+      "}" +
+      "[data-question-choices] .aamc-label{" +
+      "font-weight:700!important;margin-right:4px!important;min-width:18px!important;color:#111!important;" +
+      "}" +
+      "[data-question-choices] .aamc-radio-input{" +
+      "position:absolute!important;opacity:0!important;pointer-events:none!important;" +
+      "}" +
       ".aamc-answer-text{font-weight:400!important;}" +
       ".text-block-54{color:#111!important;font-size:14px!important;}" +
       ".text-block-56{color:#111!important;text-transform:capitalize!important;margin-bottom:6px!important;font-size:16px!important;font-weight:700!important;}" +
@@ -1935,7 +1969,7 @@
       var isSelected = key === selectedKey;
 
       answer.classList.toggle("selected", isSelected);
-      if (radio) radio.classList.toggle("selected", isSelected);
+      if (radio) radio.classList.remove("selected");
       input.checked = isSelected;
     });
 
@@ -2011,6 +2045,7 @@
       }
 
       node.style.display = "";
+      node.classList.remove("selected", "correct", "incorrect", "w--current");
       node.setAttribute("data-choice-key", item.key);
 
       var labelSpan = node.querySelector(".aamc-label");
