@@ -301,7 +301,7 @@
       })
       .forEach(function (line) {
         var p = document.createElement("p");
-        p.textContent = line;
+        p.innerHTML = formatScientificItalics(line);
         p.style.margin = "0 0 12px";
         container.appendChild(p);
 
@@ -801,6 +801,12 @@
     var nodes = document.querySelectorAll(selector);
     nodes.forEach(function (node) {
       node.textContent = value;
+    });
+  }
+
+  function setRichText(selector, value) {
+    document.querySelectorAll(selector).forEach(function (node) {
+      node.innerHTML = formatScientificItalics(value);
     });
   }
 
@@ -1919,6 +1925,11 @@
       .replaceAll("'", "&#039;");
   }
 
+  /** *gene* / *E. coli* markers in passage and question copy → italics. */
+  function formatScientificItalics(value) {
+    return escapeHtml(value).replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+  }
+
   function getChoiceEntries(choices) {
     var keys = Object.keys(choices || {});
     keys.sort(function (a, b) {
@@ -2056,7 +2067,7 @@
           '<span class="aamc-label">' +
           escapeHtml(item.key) +
           ".</span> " +
-          escapeHtml(item.text);
+          formatScientificItalics(item.text);
       }
 
       var input = ensureRadioInput(node);
@@ -2186,7 +2197,7 @@
     CURRENT_TEST_CONTEXT.passage_id = content.current_passage.id || null;
     renderPassageBody(content.current_passage);
     renderPassageAttribution(content.current_passage);
-    setText("[data-question-stem]", content.current_question.stem || "");
+    setRichText("[data-question-stem]", content.current_question.stem || "");
 
     renderStyledChoices(
       content.current_question.choices || {},
