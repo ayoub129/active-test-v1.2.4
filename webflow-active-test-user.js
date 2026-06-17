@@ -24,6 +24,7 @@
   var ATTEMPT_ANSWER_EVENTS_STORAGE_KEY = "portal_attempt_answer_events";
   var QUESTION_DWELL_STORAGE_KEY = "portal_attempt_question_dwell";
   var PASSAGE_ANNOTATIONS_STORAGE_KEY = "portal_passage_annotations";
+  var QUESTION_ANNOTATIONS_STORAGE_KEY = "portal_question_annotations";
   var ACTIVE_TEST_PRELOAD_STYLE_ID = "active-test-preload-style";
   var ACTIVE_TEST_APP_STYLE_ID = "active-test-ui-overrides";
   var QUESTION_NAV_LOADING_ID = "question-nav-loading-indicator";
@@ -234,6 +235,109 @@
     setPassageAnnotationsStore(store);
   }
 
+  function getQuestionAnnotationsStore() {
+    var raw = localStorage.getItem(QUESTION_ANNOTATIONS_STORAGE_KEY);
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw) || {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function setQuestionAnnotationsStore(store) {
+    localStorage.setItem(
+      QUESTION_ANNOTATIONS_STORAGE_KEY,
+      JSON.stringify(store || {}),
+    );
+  }
+
+  function getCurrentQuestionId() {
+    return (
+      CURRENT_TEST_CONTEXT.question_id ||
+      (window.activeTestContent &&
+        window.activeTestContent.current_question &&
+        window.activeTestContent.current_question.id) ||
+      null
+    );
+  }
+
+  function getQuestionAnnotation(attemptId, questionId) {
+    if (!attemptId || !questionId) return {};
+    var store = getQuestionAnnotationsStore();
+    return (store[attemptId] && store[attemptId][questionId]) || {};
+  }
+
+  function updateCurrentQuestionAnnotation(updater) {
+    var attemptId = getContextSessionId();
+    var questionId = getCurrentQuestionId();
+    if (!attemptId || !questionId || typeof updater !== "function") return;
+    var store = getQuestionAnnotationsStore();
+    if (!store[attemptId]) store[attemptId] = {};
+    var current =
+      store[attemptId][questionId] &&
+      typeof store[attemptId][questionId] === "object"
+        ? store[attemptId][questionId]
+        : {};
+    var next = updater(current) || current;
+    store[attemptId][questionId] = next;
+    setQuestionAnnotationsStore(store);
+  }
+
+  function getCurrentQuestionAnnotation() {
+    return getQuestionAnnotation(getContextSessionId(), getCurrentQuestionId());
+  }
+
+  function persistQuestionStemMarkup() {
+    var stem = document.querySelector("[data-question-stem]");
+    if (!stem) return;
+    updateCurrentQuestionAnnotation(function (entry) {
+      entry.stem_html = stem.innerHTML;
+      return entry;
+    });
+  }
+
+  function persistQuestionChoiceMarkup() {
+    var container = document.querySelector("[data-question-choices]");
+    if (!container) return;
+    updateCurrentQuestionAnnotation(function (entry) {
+      var choiceHtml = entry.choice_html || {};
+      var struck = entry.struck_choices || {};
+      container.querySelectorAll(".aamc-answer").forEach(function (answer) {
+        var key = answer.getAttribute("data-choice-key");
+        var text = answer.querySelector(".aamc-answer-text");
+        if (!key || !text) return;
+        choiceHtml[key] = text.innerHTML;
+        struck[key] = answer.classList.contains("is-struck");
+      });
+      entry.choice_html = choiceHtml;
+      entry.struck_choices = struck;
+      return entry;
+    });
+  }
+
+  function persistMarkupForRoot(root) {
+    if (!root) return;
+    var passageBody = getPassageBodyElement();
+    if (passageBody && root === passageBody) {
+      persistCurrentPassageMarkup();
+      return;
+    }
+    if (
+      root.matches &&
+      root.matches("[data-question-stem]")
+    ) {
+      persistQuestionStemMarkup();
+      return;
+    }
+    if (
+      root.matches &&
+      root.matches("[data-question-choices]")
+    ) {
+      persistQuestionChoiceMarkup();
+    }
+  }
+
   var FIGURE_INLINE_REF_RE = /\(\s*Figure\s+([^)]+?)\s*\)/gi;
 
   function normalizeFigurePanelKey(raw) {
@@ -384,6 +488,9 @@
       "[data-question-choices] .aamc-answer:hover{background:#f0f5ff!important;}" +
       "[data-question-choices] .aamc-answer.selected{" +
       "background:#ddeeff!important;border-color:#1B3669!important;" +
+      "}" +
+      "[data-question-choices] .aamc-answer.is-struck .aamc-answer-text{" +
+      "text-decoration:line-through!important;text-decoration-thickness:1.5px!important;" +
       "}" +
       "[data-question-choices] .aamc-radio{" +
       "width:16px!important;height:16px!important;min-width:16px!important;" +
@@ -807,6 +914,16 @@
   function setRichText(selector, value) {
     document.querySelectorAll(selector).forEach(function (node) {
       node.innerHTML = formatScientificItalics(value);
+    });
+  }
+
+  function renderQuestionStem(stemText) {
+    var saved = getCurrentQuestionAnnotation();
+    document.querySelectorAll("[data-question-stem]").forEach(function (node) {
+      node.innerHTML =
+        saved && saved.stem_html
+          ? String(saved.stem_html)
+          : formatScientificItalics(stemText || "");
     });
   }
 
@@ -1465,20 +1582,35 @@
     });
   }
 
-  function isSelectionInsidePassage() {
-    var body = getPassageBodyElement();
-    if (!body) return false;
+  function getMarkableRoots() {
+    return [
+      getPassageBodyElement(),
+      document.querySelector("[data-question-stem]"),
+      document.querySelector("[data-question-choices]"),
+    ].filter(Boolean);
+  }
+
+  function getSelectionMarkableRoot() {
     var selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return false;
-    if (selection.isCollapsed) return false;
+    if (!selection || selection.rangeCount === 0) return null;
+    if (selection.isCollapsed) return null;
     var range = selection.getRangeAt(0);
     var common = range.commonAncestorContainer;
-    return body.contains(common.nodeType === 1 ? common : common.parentElement);
+    var node = common.nodeType === 1 ? common : common.parentElement;
+    return (
+      getMarkableRoots().find(function (root) {
+        return root && (root === node || root.contains(node));
+      }) || null
+    );
+  }
+
+  function isSelectionInsideMarkableText() {
+    return Boolean(getSelectionMarkableRoot());
   }
 
   function updateFormatButtonsState() {
     var buttons = getFormattingButtons();
-    var enabled = isSelectionInsidePassage();
+    var enabled = isSelectionInsideMarkableText();
     setButtonEnabled(buttons.highlightButton, enabled);
     setButtonEnabled(buttons.strikeButton, enabled);
   }
@@ -1523,9 +1655,8 @@
     );
   }
 
-  function getPassageMarkSpansInRange(range, markType) {
-    var body = getPassageBodyElement();
-    if (!body || !range || !markType) return [];
+  function getPassageMarkSpansInRange(range, markType, root) {
+    if (!root || !range || !markType) return [];
 
     var matches = [];
     var add = function (span) {
@@ -1538,13 +1669,13 @@
         container && container.nodeType === 3
           ? container.parentElement
           : container;
-      while (node && node !== body) {
+      while (node && node !== root) {
         if (getPassageMarkType(node) === markType) add(node);
         node = node.parentElement;
       }
     });
 
-    Array.from(body.querySelectorAll("span")).forEach(function (span) {
+    Array.from(root.querySelectorAll("span")).forEach(function (span) {
       if (getPassageMarkType(span) !== markType) return;
       if (rangeIntersectsNode(range, span)) add(span);
     });
@@ -1561,22 +1692,20 @@
     parent.removeChild(span);
   }
 
-  function removePassageMarksInRange(range, markType) {
-    var body = getPassageBodyElement();
-    if (!body) return false;
-    var spans = getPassageMarkSpansInRange(range, markType);
+  function removePassageMarksInRange(range, markType, root) {
+    if (!root) return false;
+    var spans = getPassageMarkSpansInRange(range, markType, root);
     if (!spans.length) return false;
     spans.forEach(unwrapPassageMarkSpan);
-    body.normalize();
+    root.normalize();
     return true;
   }
 
-  function getTextNodesInRange(range) {
-    var body = getPassageBodyElement();
-    if (!body || !range) return [];
+  function getTextNodesInRange(range, root) {
+    if (!root || !range) return [];
 
     var nodes = [];
-    var walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: function (node) {
         if (!node.nodeValue || node.nodeValue.length === 0) {
           return NodeFilter.FILTER_REJECT;
@@ -1629,28 +1758,28 @@
     parent.removeChild(textNode);
   }
 
-  function wrapRangeWithPassageMark(range, styleText, markType) {
-    var nodes = getTextNodesInRange(range);
+  function wrapRangeWithPassageMark(range, styleText, markType, root) {
+    var nodes = getTextNodesInRange(range, root);
     if (!nodes.length) return;
 
     for (var i = nodes.length - 1; i >= 0; i--) {
       wrapTextNodeInRange(nodes[i], range, styleText, markType);
     }
 
-    var body = getPassageBodyElement();
-    if (body) body.normalize();
+    if (root) root.normalize();
   }
 
   function wrapSelectionWithStyle(styleText, markType) {
     var selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed)
       return;
-    if (!isSelectionInsidePassage()) return;
+    var root = getSelectionMarkableRoot();
+    if (!root) return;
 
     var range = selection.getRangeAt(0).cloneRange();
-    wrapRangeWithPassageMark(range, styleText, markType);
+    wrapRangeWithPassageMark(range, styleText, markType, root);
     selection.removeAllRanges();
-    persistCurrentPassageMarkup();
+    persistMarkupForRoot(root);
     updateFormatButtonsState();
   }
 
@@ -1658,12 +1787,13 @@
     var selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed)
       return;
-    if (!isSelectionInsidePassage()) return;
+    var root = getSelectionMarkableRoot();
+    if (!root) return;
 
     var range = selection.getRangeAt(0).cloneRange();
-    if (removePassageMarksInRange(range, markType)) {
+    if (removePassageMarksInRange(range, markType, root)) {
       selection.removeAllRanges();
-      persistCurrentPassageMarkup();
+      persistMarkupForRoot(root);
       updateFormatButtonsState();
       return;
     }
@@ -2023,6 +2153,24 @@
     }
   }
 
+  function hasActiveSelectionInside(node) {
+    if (!node) return false;
+    var selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return false;
+    }
+    var range = selection.getRangeAt(0);
+    var common = range.commonAncestorContainer;
+    var selectedNode = common.nodeType === 1 ? common : common.parentElement;
+    return Boolean(selectedNode && node.contains(selectedNode));
+  }
+
+  function toggleChoiceStrike(answerNode) {
+    if (!answerNode) return;
+    answerNode.classList.toggle("is-struck");
+    persistQuestionChoiceMarkup();
+  }
+
   function renderStyledChoices(choices, selectedChoice, questionId) {
     var container = document.querySelector("[data-question-choices]");
     if (!container) return;
@@ -2041,6 +2189,15 @@
     }
 
     var template = answerNodes[0];
+    var savedAnnotation = getCurrentQuestionAnnotation();
+    var savedChoiceHtml =
+      savedAnnotation && savedAnnotation.choice_html
+        ? savedAnnotation.choice_html
+        : {};
+    var savedStruck =
+      savedAnnotation && savedAnnotation.struck_choices
+        ? savedAnnotation.struck_choices
+        : {};
 
     while (answerNodes.length < entries.length) {
       var clone = template.cloneNode(true);
@@ -2063,19 +2220,30 @@
       var labelSpan = node.querySelector(".aamc-label");
       if (labelSpan) {
         var labelHost = labelSpan.parentElement || node;
-        labelHost.innerHTML =
-          '<span class="aamc-label">' +
-          escapeHtml(item.key) +
-          ".</span> " +
-          formatScientificItalics(item.text);
+        labelHost.innerHTML = savedChoiceHtml[item.key]
+          ? String(savedChoiceHtml[item.key])
+          : '<span class="aamc-label">' +
+            escapeHtml(item.key) +
+            ".</span> " +
+            formatScientificItalics(item.text);
       }
+
+      node.classList.toggle("is-struck", Boolean(savedStruck[item.key]));
 
       var input = ensureRadioInput(node);
       input.value = item.key;
       input.name = "active-question-choice-" + (questionId || "unknown");
       input.setAttribute("data-choice-key", item.key);
 
-      node.onclick = function () {
+      node.oncontextmenu = function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleChoiceStrike(node);
+      };
+
+      node.onclick = function (event) {
+        if (hasActiveSelectionInside(node)) return;
+        if (event && event.button && event.button !== 0) return;
         applyChoiceSelection(container, item.key, questionId);
       };
     });
@@ -2195,9 +2363,10 @@
     setText("[data-passage-title]", content.current_passage.title || "");
     applySessionFromContent(content);
     CURRENT_TEST_CONTEXT.passage_id = content.current_passage.id || null;
+    CURRENT_TEST_CONTEXT.question_id = content.current_question.id || null;
     renderPassageBody(content.current_passage);
     renderPassageAttribution(content.current_passage);
-    setRichText("[data-question-stem]", content.current_question.stem || "");
+    renderQuestionStem(content.current_question.stem || "");
 
     renderStyledChoices(
       content.current_question.choices || {},
@@ -2211,7 +2380,6 @@
     window.activeTestContent = content;
     renderNavigationItems(content);
 
-    CURRENT_TEST_CONTEXT.question_id = content.current_question.id || null;
     CURRENT_TEST_CONTEXT.is_flagged = Boolean(
       content.current_question.is_flagged,
     );
