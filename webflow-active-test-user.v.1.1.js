@@ -339,6 +339,9 @@
   }
 
   var FIGURE_INLINE_REF_RE = /\(\s*Figure\s+([^)]+?)\s*\)/gi;
+  var FIGURE_ZOOM_MIN = 40;
+  var FIGURE_ZOOM_MAX = 100;
+  var FIGURE_ZOOM_STEP = 10;
 
   function normalizeFigurePanelKey(raw) {
     if (raw == null) return "";
@@ -358,6 +361,108 @@
       if (key) map[key] = f;
     });
     return map;
+  }
+
+  function clampFigureZoom(value) {
+    var n = Number(value);
+    if (!Number.isFinite(n)) n = FIGURE_ZOOM_MIN;
+    return Math.max(FIGURE_ZOOM_MIN, Math.min(FIGURE_ZOOM_MAX, n));
+  }
+
+  function figureZoomIcon(direction) {
+    var isOut = direction === "out";
+    var line = isOut
+      ? '<line x1="8" y1="11" x2="14" y2="11"></line>'
+      : '<line x1="8" y1="11" x2="14" y2="11"></line><line x1="11" y1="8" x2="11" y2="14"></line>';
+    return (
+      '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="11" cy="11" r="6"></circle>' +
+      line +
+      '<line x1="16" y1="16" x2="21" y2="21"></line>' +
+      "</svg>"
+    );
+  }
+
+  function setFigureZoom(panel, zoom, direction) {
+    if (!panel) return;
+    var img = panel.querySelector("[data-passage-figure-image]") ||
+      panel.querySelector("img");
+    if (!img) return;
+
+    zoom = clampFigureZoom(zoom);
+    if (!direction) {
+      direction = zoom >= FIGURE_ZOOM_MAX ? "out" : "in";
+    }
+    if (zoom <= FIGURE_ZOOM_MIN) direction = "in";
+    if (zoom >= FIGURE_ZOOM_MAX) direction = "out";
+
+    panel.setAttribute("data-passage-figure-zoom", String(zoom));
+    panel.setAttribute("data-passage-figure-zoom-direction", direction);
+    img.style.width = zoom + "%";
+    img.style.setProperty("--passage-figure-width", zoom + "%");
+
+    var button = panel.querySelector("[data-passage-figure-zoom-button]");
+    if (button) {
+      var isOut = direction === "out";
+      button.innerHTML = figureZoomIcon(direction);
+      button.setAttribute("aria-label", isOut ? "Zoom figure out" : "Zoom figure in");
+      button.setAttribute("title", isOut ? "Zoom out" : "Zoom in");
+    }
+  }
+
+  function wireFigureZoomControl(panel) {
+    if (!panel) return;
+    var img = panel.querySelector("[data-passage-figure-image]") ||
+      panel.querySelector("img");
+    if (!img) return;
+
+    img.setAttribute("data-passage-figure-image", "");
+    panel.dataset.figureZoomWired = "1";
+
+    var controls =
+      panel.querySelector("[data-passage-figure-zoom-controls]") ||
+      document.createElement("div");
+    controls.setAttribute("data-passage-figure-zoom-controls", "");
+
+    var button =
+      controls.querySelector("[data-passage-figure-zoom-button]") ||
+      document.createElement("button");
+    button.type = "button";
+    button.className = "passage-figure-zoom-btn";
+    button.setAttribute("data-passage-figure-zoom-button", "");
+    if (!button.parentNode) controls.appendChild(button);
+    if (!controls.parentNode) panel.appendChild(controls);
+
+    if (!button._figureZoomButtonWired) {
+      button._figureZoomButtonWired = true;
+      button.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        var current = clampFigureZoom(
+          panel.getAttribute("data-passage-figure-zoom") || FIGURE_ZOOM_MIN,
+        );
+        var direction =
+          panel.getAttribute("data-passage-figure-zoom-direction") || "in";
+        var next =
+          direction === "out"
+            ? current - FIGURE_ZOOM_STEP
+            : current + FIGURE_ZOOM_STEP;
+        setFigureZoom(panel, next, direction);
+      });
+    }
+
+    setFigureZoom(
+      panel,
+      panel.getAttribute("data-passage-figure-zoom") || FIGURE_ZOOM_MIN,
+      panel.getAttribute("data-passage-figure-zoom-direction") || "in",
+    );
+  }
+
+  function wirePassageFigureZoomControls(container) {
+    if (!container) return;
+    container
+      .querySelectorAll("[data-passage-inline-figure]")
+      .forEach(wireFigureZoomControl);
   }
 
   function createInlinePassageFigureElement(figure) {
@@ -380,6 +485,7 @@
     // Caption is omitted here: figure assets (e.g. SVG) usually embed the formatted caption;
     // appending DB caption as <figcaption> duplicated that text on active test and review.
 
+    wireFigureZoomControl(panel);
     return panel;
   }
 
@@ -425,6 +531,7 @@
           container.appendChild(figEl);
         }
       });
+    wirePassageFigureZoomControls(container);
   }
 
   function renderPassageBody(passage) {
@@ -437,6 +544,7 @@
     );
     if (saved) {
       body.innerHTML = saved;
+      wirePassageFigureZoomControls(body);
       return;
     }
     fillPassageBodyWithInlineFigures(
@@ -519,8 +627,13 @@
       ".text-block-56{color:#111!important;text-transform:capitalize!important;margin-bottom:6px!important;font-size:16px!important;font-weight:700!important;}" +
       ".text-block-63.nav-flag-flagged{color:#e00!important;}" +
       "[data-passage-figures]{display:none!important;}" +
-      "[data-passage-inline-figure]{margin:0;}" +
-      "[data-passage-inline-figure] img{display:block;max-width:100%;height:auto;width:80%;margin: 0 auto;}" +
+      "[data-passage-inline-figure]{margin:0;text-align:center;}" +
+      "[data-passage-inline-figure] img{display:block;max-width:100%;height:auto;width:var(--passage-figure-width,40%);margin:0 auto;transition:width .18s ease;}" +
+      "[data-passage-figure-zoom-controls]{display:flex;justify-content:center;margin-top:8px;}" +
+      ".passage-figure-zoom-btn{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#111;cursor:pointer;box-shadow:0 1px 3px rgba(15,23,42,.12);padding:0;}" +
+      ".passage-figure-zoom-btn:hover{background:#f8fafc;border-color:#94a3b8;}" +
+      ".passage-figure-zoom-btn:focus{outline:2px solid #1B3669;outline-offset:2px;}" +
+      ".passage-figure-zoom-btn svg{width:18px;height:18px;display:block;}" +
       "[data-passage-inline-figure] [data-passage-figure-caption],figcaption[data-passage-figure-caption]{margin-top:8px;font-size:13px;line-height:1.45;color:#333;}" +
       "[data-passage-attribution]{margin-top:16px;font-size:12px;line-height:1.45;color:#555;}" +
       "[data-text-action='highlight'][data-highlight-color]{box-shadow:inset 0 -4px 0 var(--active-highlight-color,#fff59d);}" +
